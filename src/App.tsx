@@ -68,7 +68,7 @@ type DailyRecord = {
 };
 
 type Progress = {
-  version: 2;
+  version: 3;
   xp: number;
   answers: number;
   correct: number;
@@ -76,6 +76,7 @@ type Progress = {
   concepts: Record<string, ConceptProgress>;
   activeDays: string[];
   dailyMissions: Record<string, DailyRecord>;
+  studiedConcepts: string[];
 };
 
 type DailyQuizItem = {
@@ -339,6 +340,52 @@ const CONCEPTS: Concept[] = [
       ],
       answer: 0,
       explanation: "Cela vérifie une première portion du chemin réseau avant de tester plus loin.",
+    },
+  },
+  {
+    id: "icmp",
+    term: "ICMP",
+    category: "Réseau",
+    short: "Le protocole de messages de contrôle utilisé notamment par ping.",
+    definition:
+      "ICMP permet aux machines et aux routeurs d’échanger de courts messages de contrôle ou d’erreur autour d’IP. Ping utilise ICMP Echo Request et Echo Reply.",
+    example:
+      "Un délai d’attente dans ping signifie qu’aucune réponse ICMP attendue n’est revenue à temps ; cela ne prouve pas que tous les services de la cible sont arrêtés.",
+    confusion:
+      "ICMP n’est ni un test, ni un port, ni le synonyme de ping : ping est un outil qui s’appuie sur certains messages ICMP.",
+    quiz: {
+      question: "Quelle relation entre ping et ICMP est la plus juste ?",
+      options: [
+        "Ping utilise des messages ICMP pour demander et recevoir un écho",
+        "ICMP est le port réseau réservé à la commande ping",
+        "Ping et ICMP sont deux noms strictement équivalents",
+      ],
+      answer: 0,
+      explanation:
+        "Ping est l’outil visible. ICMP est le protocole de contrôle qui transporte généralement ses demandes Echo et ses réponses.",
+    },
+  },
+  {
+    id: "ttl",
+    term: "TTL",
+    category: "Réseau",
+    short: "Un même sigle pour limiter la vie d’un paquet IP ou d’une réponse DNS.",
+    definition:
+      "Dans IP, le TTL diminue à chaque routeur afin d’éviter les boucles infinies. Dans DNS, il indique en secondes combien de temps une réponse peut rester en cache.",
+    example:
+      "Dans « temps=18 ms TTL=57 », 18 ms est le délai mesuré et 57 le compteur IP encore présent dans la réponse.",
+    confusion:
+      "Le TTL affiché par ping n’est ni une durée en millisecondes ni le TTL de cache DNS. Le contexte détermine le sens.",
+    quiz: {
+      question: "Dans une réponse ping affichant « temps=18 ms TTL=57 », que représente 57 ?",
+      options: [
+        "Le compteur TTL IP restant dans le paquet reçu",
+        "Le temps aller-retour arrondi à 57 millisecondes",
+        "La durée pendant laquelle Windows garde le nom DNS en cache",
+      ],
+      answer: 0,
+      explanation:
+        "Ici, TTL appartient au paquet IP reçu. Il a été décrémenté par les routeurs traversés ; le délai est affiché séparément après « temps= ».",
     },
   },
   {
@@ -844,6 +891,8 @@ const CONCEPT_REFERENCE_ALIASES: { id: string; aliases: string[] }[] = [
   { id: "dhcp", aliases: ["DHCP"] },
   { id: "dns", aliases: ["DNS"] },
   { id: "ping", aliases: ["ping"] },
+  { id: "icmp", aliases: ["ICMP"] },
+  { id: "ttl", aliases: ["TTL"] },
   { id: "ram", aliases: ["RAM"] },
   { id: "ssd", aliases: ["SSD"] },
 ];
@@ -867,7 +916,7 @@ const CONCEPT_LINK_PATTERN = new RegExp(
 );
 
 const emptyProgress: Progress = {
-  version: 2,
+  version: 3,
   xp: 0,
   answers: 0,
   correct: 0,
@@ -875,6 +924,7 @@ const emptyProgress: Progress = {
   concepts: {},
   activeDays: [],
   dailyMissions: {},
+  studiedConcepts: [],
 };
 
 function clamp(value: number, min = 0, max = 100) {
@@ -984,10 +1034,11 @@ function migrateProgress(value: unknown): Progress {
     concepts?: Record<string, ConceptProgress>;
     activeDays?: string[];
     dailyMissions?: Record<string, DailyRecord>;
+    studiedConcepts?: string[];
   };
-  if (saved.version !== 1 && saved.version !== 2) return emptyProgress;
+  if (saved.version !== 1 && saved.version !== 2 && saved.version !== 3) return emptyProgress;
   return {
-    version: 2,
+    version: 3,
     xp: typeof saved.xp === "number" ? saved.xp : 0,
     answers: typeof saved.answers === "number" ? saved.answers : 0,
     correct: typeof saved.correct === "number" ? saved.correct : 0,
@@ -996,6 +1047,7 @@ function migrateProgress(value: unknown): Progress {
     activeDays: Array.isArray(saved.activeDays) ? saved.activeDays : [],
     dailyMissions:
       saved.dailyMissions && typeof saved.dailyMissions === "object" ? saved.dailyMissions : {},
+    studiedConcepts: Array.isArray(saved.studiedConcepts) ? saved.studiedConcepts : [],
   };
 }
 
@@ -1189,7 +1241,7 @@ export default function Home() {
   }, [notice]);
 
   const attemptedConcepts = CONCEPTS.filter(
-    (concept) => progressFor(progress, concept.id).attempts > 0,
+    (concept) => progressFor(progress, concept.id).attempts > 0 || progress.studiedConcepts.includes(concept.id),
   );
   const masteredConcepts = CONCEPTS.filter((concept) => {
     const item = progressFor(progress, concept.id);
@@ -1469,11 +1521,18 @@ export default function Home() {
   }
 
   function assessGlossary(knewIt: boolean) {
-    recordAnswer([openConcept.id], knewIt, 0.55);
-    setNotice(knewIt ? "Notion espacée pour plus tard" : "Notion ajoutée aux révisions proches");
-    const currentIndex = filteredConcepts.findIndex((concept) => concept.id === openConcept.id);
-    const next = filteredConcepts[(currentIndex + 1) % Math.max(filteredConcepts.length, 1)];
-    if (next) setOpenConceptId(next.id);
+    if (!knewIt) {
+      setNotice("Prends le temps : relis le modèle mental et refais la manipulation guidée");
+      return;
+    }
+    setProgress((current) => ({
+      ...current,
+      xp: current.studiedConcepts.includes(openConcept.id) ? current.xp : current.xp + 2,
+      studiedConcepts: current.studiedConcepts.includes(openConcept.id)
+        ? current.studiedConcepts
+        : [...current.studiedConcepts, openConcept.id],
+    }));
+    setNotice("Notion découverte · l’entraînement vérifiera maintenant ce qui tient vraiment");
   }
 
   function startReview() {
@@ -1657,8 +1716,8 @@ export default function Home() {
               ["dashboard", "Tableau de bord", "dashboard"],
               ["daily", "Programme", "calendar"],
               ["missions", "Missions", "missions"],
-              ["glossary", "Glossaire", "glossary"],
-              ["review", "Révisions", "review"],
+              ["glossary", "Apprendre", "glossary"],
+              ["review", "S’entraîner", "review"],
               ["memos", "Fiches mémo", "memo"],
             ] as [View, string, string][]
           ).map(([id, label, icon]) => (
@@ -1735,7 +1794,7 @@ export default function Home() {
                   <div className="progress-track" aria-label={`${masteredConcepts.length} notions solides sur ${CONCEPTS.length}`}>
                     <span style={{ width: `${(masteredConcepts.length / CONCEPTS.length) * 100}%` }} />
                   </div>
-                  <small>{attemptedConcepts.length ? `${attemptedConcepts.length} déjà rencontrées` : "Le suivi commence à ta première réponse"}</small>
+                  <small>{attemptedConcepts.length ? `${attemptedConcepts.length} déjà rencontrées` : "Le suivi commence à ta première fiche"}</small>
                 </div>
               </article>
               <article className="paper-card focus-card">
@@ -2184,9 +2243,9 @@ export default function Home() {
           )}
           <div className="page-title-row">
             <div>
-              <p className="kicker">Les mots utiles, enfin reliés à quelque chose</p>
-              <h1>Glossaire actif</h1>
-              <p className="lede">Définition courte, usage concret, piège fréquent, puis rappel actif.</p>
+              <p className="kicker">Comprendre avant de se tester</p>
+              <h1>Cours & notions</h1>
+              <p className="lede">Un modèle mental, les acteurs réels, ce que tu verras à l’écran et une manipulation guidée avant les questions.</p>
             </div>
             <div className="annotation-card">
               <strong>{attemptedConcepts.length} / {CONCEPTS.length}</strong>
@@ -2247,18 +2306,82 @@ export default function Home() {
                 <p className="term-expansion">{openEnrichment.expansion}</p>
               )}
               <p className="definition-short">{openConcept.short}</p>
+              {openEnrichment?.prerequisites?.length ? (
+                <div className="prerequisite-strip">
+                  <span>À connaître avant</span>
+                  <div>
+                    {openEnrichment.prerequisites.map((id) => {
+                      const prerequisite = CONCEPTS.find((item) => item.id === id);
+                      return prerequisite ? (
+                        <button key={id} onClick={() => setOpenConceptId(id)}>{prerequisite.term}</button>
+                      ) : null;
+                    })}
+                  </div>
+                </div>
+              ) : null}
               <div className="definition-block">
                 <h3>En clair</h3>
                 <p>{renderConceptText(openConcept.definition, openConcept.id)}</p>
               </div>
               {openEnrichment && (
                 <>
+                  {openEnrichment.mentalModel ? (
+                    <div className="definition-block mental-model">
+                      <h3>Le modèle à garder en tête</h3>
+                      <p>{renderConceptText(openEnrichment.mentalModel, openConcept.id)}</p>
+                    </div>
+                  ) : null}
+                  {openEnrichment.actors?.length ? (
+                    <div className="definition-block actors-block">
+                      <h3>Qui fait quoi ?</h3>
+                      <div className="actor-grid">
+                        {openEnrichment.actors.map((actor) => (
+                          <div key={actor.name}>
+                            <strong>{actor.name}</strong>
+                            <span>{renderConceptText(actor.role, openConcept.id)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="definition-block mechanism">
-                    <h3>Comment ça fonctionne</h3>
+                    <h3>Ce qui se passe, dans l’ordre</h3>
                     <ol>
                       {openEnrichment.mechanism.map((step) => <li key={step}>{renderConceptText(step, openConcept.id)}</li>)}
                     </ol>
                   </div>
+                  {openEnrichment.observable ? (
+                    <div className="definition-block observable-block">
+                      <h3>À quoi ça ressemble ?</h3>
+                      <code className="command-heading">{openEnrichment.observable.command}</code>
+                      <pre>{openEnrichment.observable.output}</pre>
+                      <ul>
+                        {openEnrichment.observable.reading.map((line) => <li key={line}>{renderConceptText(line, openConcept.id)}</li>)}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {openEnrichment.practice ? (
+                    <div className="definition-block practice-block">
+                      <h3>Essaie sur ton PC — {openEnrichment.practice.title}</h3>
+                      <ol>
+                        {openEnrichment.practice.steps.map((step) => <li key={step}>{renderConceptText(step, openConcept.id)}</li>)}
+                      </ol>
+                      <p className="expected-result"><strong>Objectif :</strong> {renderConceptText(openEnrichment.practice.expected, openConcept.id)}</p>
+                      {openEnrichment.practice.caution ? <p className="practice-caution"><strong>Prudence :</strong> {renderConceptText(openEnrichment.practice.caution, openConcept.id)}</p> : null}
+                    </div>
+                  ) : null}
+                  {openEnrichment.proof ? (
+                    <div className="proof-grid">
+                      <div>
+                        <h3>Ce que cela montre</h3>
+                        <ul>{openEnrichment.proof.shows.map((item) => <li key={item}>{renderConceptText(item, openConcept.id)}</li>)}</ul>
+                      </div>
+                      <div>
+                        <h3>Ce que cela ne montre pas</h3>
+                        <ul>{openEnrichment.proof.doesNotShow.map((item) => <li key={item}>{renderConceptText(item, openConcept.id)}</li>)}</ul>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="definition-block history">
                     <h3>D’où ça vient</h3>
                     <p>{renderConceptText(openEnrichment.history, openConcept.id)}</p>
@@ -2299,10 +2422,10 @@ export default function Home() {
                 </div>
               )}
               <div className="self-assessment">
-                <span>Sans relire : pourrais-tu l’expliquer à quelqu’un ?</span>
+                <span>Peux-tu maintenant raconter le mécanisme avec tes propres mots ?</span>
                 <div>
-                  <button onClick={() => assessGlossary(false)}>Pas encore</button>
-                  <button onClick={() => assessGlossary(true)}>Oui, clairement</button>
+                  <button onClick={() => assessGlossary(false)}>J’ai besoin de reprendre</button>
+                  <button onClick={() => assessGlossary(true)}>Oui, je peux m’entraîner</button>
                 </div>
               </div>
             </article>
@@ -2314,9 +2437,9 @@ export default function Home() {
         <section className="content-section page-section review-section">
           <div className="page-title-row">
             <div>
-              <p className="kicker">Séance adaptative</p>
-              <h1>Révision ciblée</h1>
-              <p className="lede">Le choix des questions dépend de tes erreurs, de ta solidité et du temps écoulé.</p>
+              <p className="kicker">Appliquer après avoir compris</p>
+              <h1>Entraînement adaptatif</h1>
+              <p className="lede">Une notion nouvelle se découvre d’abord dans sa fiche. Les questions servent ensuite à l’utiliser, puis à la consolider dans le temps.</p>
             </div>
             <div className="annotation-card">
               <strong>{reviewDone ? reviewSessionScore : reviewIndex + 1} / {reviewQueue.length || 8}</strong>
@@ -2351,6 +2474,13 @@ export default function Home() {
                   <span className="status-label">{reviewConcept.category}</span>
                   <span>{reviewConcept.term}</span>
                 </div>
+                {!progress.studiedConcepts.includes(reviewConcept.id) ? (
+                  <div className="learning-gate">
+                    <strong>Nouvelle notion — ne devine pas.</strong>
+                    <p>Lis d’abord la fiche, observe l’exemple et fais la manipulation guidée si elle est proposée. La question viendra ensuite vérifier ton modèle mental.</p>
+                    <button onClick={() => openGlossaryConcept(reviewConcept.id)}>Découvrir {reviewConcept.term}</button>
+                  </div>
+                ) : null}
                 <h2>{reviewQuestion.question}</h2>
                 <div className="answer-list">
                   {reviewQuestion.options.map((option, index) => {

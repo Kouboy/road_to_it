@@ -7,7 +7,25 @@ export type ReviewQuestion = {
 
 export type ConceptEnrichment = {
   expansion?: string;
+  mentalModel?: string;
+  prerequisites?: string[];
+  actors?: { name: string; role: string }[];
   mechanism: string[];
+  observable?: {
+    command: string;
+    output: string;
+    reading: string[];
+  };
+  practice?: {
+    title: string;
+    steps: string[];
+    expected: string;
+    caution?: string;
+  };
+  proof?: {
+    shows: string[];
+    doesNotShow: string[];
+  };
   history: string;
   fieldNotes: string[];
   related: string[];
@@ -229,12 +247,61 @@ export const CONCEPT_ENRICHMENT: Record<string, ConceptEnrichment> = {
   },
   ping: {
     expansion: "Ping n’était pas à l’origine un acronyme : le nom évoque l’impulsion d’un sonar",
+    mentalModel:
+      "Ping ne « teste pas Internet » en bloc. Il envoie une question très simple à une cible précise : « peux-tu me renvoyer ce message ICMP ? ». En changeant de cible du plus proche au plus lointain, tu localises l’étage où le dialogue s’interrompt.",
+    prerequisites: ["ip", "gateway", "dns", "icmp", "ttl"],
+    actors: [
+      { name: "Toi et le terminal", role: "Vous choisissez une cible et lancez la commande ping." },
+      { name: "Résolveur DNS", role: "Il traduit d’abord le nom en adresse IP si tu as saisi un nom plutôt qu’une adresse." },
+      { name: "Pile réseau de Windows", role: "Elle fabrique le message ICMP et décide par quelle interface et quelle route l’envoyer." },
+      { name: "Carte réseau + pilote", role: "Ils transportent les trames sur le câble Ethernet ou par Wi‑Fi." },
+      { name: "Routeur(s)", role: "Ils relaient le paquet si la cible n’est pas sur le réseau local." },
+      { name: "Machine cible", role: "Si elle l’autorise, elle renvoie un message ICMP Echo Reply." },
+    ],
     mechanism: [
       "L’outil envoie généralement un message ICMP Echo Request et attend un Echo Reply.",
       "Il mesure le délai aller-retour et signale les pertes observées pendant le test.",
       "Avec un nom de domaine, une résolution de nom a lieu avant l’envoi : l’erreur peut donc précéder le test ICMP.",
       "Un pare-feu peut bloquer ICMP alors que le service recherché fonctionne parfaitement.",
     ],
+    observable: {
+      command: "ping 1.1.1.1",
+      output:
+        "Envoi d’une requête 'Ping'  1.1.1.1 avec 32 octets de données :\nRéponse de 1.1.1.1 : octets=32 temps=18 ms TTL=57\n\nStatistiques Ping : envoyés = 4, reçus = 4, perdus = 0 (perte 0 %)",
+      reading: [
+        "« Réponse de » signifie qu’un Echo Reply est revenu jusqu’au PC.",
+        "18 ms est le temps aller-retour mesuré pour cette réponse, pas un débit.",
+        "0 % de perte signifie que les quatre essais de cette courte série ont répondu.",
+        "TTL=57 est la valeur restante du compteur IP reçu ; ce n’est pas une durée de 57 secondes.",
+      ],
+    },
+    practice: {
+      title: "Pinger du proche au lointain sous Windows",
+      steps: [
+        "Ouvre Terminal ou Invite de commandes : touche Windows, saisis « terminal », puis Entrée.",
+        "Lance ping 127.0.0.1 pour vérifier que la pile réseau locale répond.",
+        "Lance ipconfig, relève la passerelle par défaut, puis exécute ping suivi de son adresse.",
+        "Lance ping 1.1.1.1 pour tester une cible extérieure sans dépendre du DNS.",
+        "Lance enfin ping example.com : cette fois, Windows doit résoudre le nom avant d’envoyer ICMP.",
+        "Pour chaque commande, note le message exact et ce qu’il permet — ou non — de conclure.",
+      ],
+      expected:
+        "Tu dois pouvoir distinguer « hôte introuvable », « délai d’attente dépassé » et « réponse de… ». Ces messages ne décrivent pas le même étage de panne.",
+      caution:
+        "Un échec n’autorise pas à conclure immédiatement que la cible est en panne : elle peut filtrer ICMP. Ne lance pas ping -t sans savoir l’arrêter avec Ctrl+C.",
+    },
+    proof: {
+      shows: [
+        "qu’un aller-retour ICMP a réussi jusqu’à cette cible, à cet instant ;",
+        "un ordre de grandeur du délai et les pertes observées pendant la série ;",
+        "avec plusieurs cibles, jusqu’à quel étage le chemin répond encore.",
+      ],
+      doesNotShow: [
+        "qu’un site web, un partage ou un autre service fonctionne ;",
+        "que la connexion est rapide ou stable sur une longue durée ;",
+        "qu’une cible silencieuse est éteinte : un pare-feu peut simplement ignorer ICMP.",
+      ],
+    },
     history:
       "Mike Muuss écrit l’outil ping en 1983 pour observer un problème réseau. L’expression Packet Internet Groper est une réinterprétation ultérieure, pas l’origine du nom.",
     fieldNotes: [
@@ -242,8 +309,117 @@ export const CONCEPT_ENRICHMENT: Record<string, ConceptEnrichment> = {
       "Une réponse prouve la joignabilité ICMP à cet instant, pas le bon fonctionnement de tous les services.",
       "Sous Windows, ping -t poursuit le test jusqu’à interruption ; utilise Ctrl+C pour obtenir le bilan.",
     ],
-    related: ["ip", "gateway", "dns"],
+    related: ["icmp", "ttl", "ip", "gateway", "dns"],
     sources: [{ label: "RFC 792 — ICMP", url: "https://www.rfc-editor.org/rfc/rfc792" }],
+  },
+  icmp: {
+    expansion: "Internet Control Message Protocol — protocole de messages de contrôle Internet",
+    mentalModel:
+      "ICMP est le langage de petits messages de service associé à IP. Les machines et routeurs l’utilisent pour signaler certains problèmes ou répondre à des tests. Ping n’est qu’un outil qui emploie deux types de messages ICMP parmi d’autres.",
+    prerequisites: ["ip", "ping"],
+    actors: [
+      { name: "Machine source", role: "Elle émet un message, par exemple Echo Request." },
+      { name: "Routeur", role: "Il peut transmettre le paquet ou renvoyer un message d’erreur, par exemple Destination Unreachable ou Time Exceeded." },
+      { name: "Machine cible", role: "Elle peut répondre par Echo Reply, ignorer la demande ou la filtrer." },
+      { name: "Pare-feu", role: "Il peut autoriser certains messages ICMP et en bloquer d’autres." },
+    ],
+    mechanism: [
+      "ICMP est transporté à l’intérieur d’un paquet IP ; il n’utilise ni port TCP ni port UDP.",
+      "Ping envoie généralement un message ICMP de type 8 (Echo Request). Une réponse IPv4 normale est de type 0 (Echo Reply).",
+      "Tracert exploite notamment l’expiration du TTL et les messages ICMP Time Exceeded renvoyés par des routeurs.",
+      "ICMP sert aussi à signaler qu’une destination ou une route est inaccessible. Le bloquer entièrement peut donc gêner le diagnostic et certains mécanismes réseau.",
+    ],
+    observable: {
+      command: "ping 192.168.1.1",
+      output:
+        "Réponse de 192.168.1.1 : octets=32 temps=2 ms TTL=64\nDélai d’attente de la demande dépassé.\nRéponse de 192.168.1.20 : Impossible de joindre l’hôte de destination.",
+      reading: [
+        "Une réponse normale correspond à un Echo Reply revenu jusqu’à la source.",
+        "Un délai d’attente signifie seulement qu’aucune réponse attendue n’est revenue à temps.",
+        "« Impossible de joindre… » peut être un message ICMP d’erreur émis par la machine locale ou un équipement intermédiaire.",
+      ],
+    },
+    practice: {
+      title: "Reconnaître les messages sans capturer de paquets",
+      steps: [
+        "Lance un ping vers ta passerelle puis vers une adresse extérieure connue.",
+        "Compare les lignes de réponse, le délai et le bilan final.",
+        "Désactive le Wi‑Fi ou débranche le câble quelques secondes, relance le test, puis observe comment le message change.",
+        "Rétablis la connexion et vérifie que le résultat redevient normal.",
+      ],
+      expected:
+        "Tu dois pouvoir expliquer que ping est la commande visible, ICMP le protocole employé et IP le véhicule qui transporte le message.",
+      caution: "Ne modifie pas le pare-feu pour forcer une réponse : le but est d’observer, pas d’affaiblir la machine.",
+    },
+    proof: {
+      shows: ["le type de dialogue de contrôle qui a eu lieu ;", "l’équipement qui a parfois produit l’erreur affichée."],
+      doesNotShow: ["l’état d’un port applicatif ;", "la cause certaine d’un silence sans capture ou test complémentaire."],
+    },
+    history:
+      "ICMP fait partie de la suite Internet historique et est formalisé pour IPv4 dans la RFC 792 de 1981. ICMPv6 joue un rôle encore plus central dans IPv6, notamment pour la découverte des voisins.",
+    fieldNotes: [
+      "Dis « le ping n’obtient pas de réponse ICMP » plutôt que « Internet est coupé ».",
+      "Ne cherche pas un numéro de port ICMP : ICMP n’est ni TCP ni UDP.",
+      "Le texte affiché dépend de l’équipement qui répond et du système utilisé ; note toujours le message exact.",
+    ],
+    related: ["ping", "ttl", "ip", "gateway"],
+    sources: [{ label: "RFC 792 — ICMP", url: "https://www.rfc-editor.org/rfc/rfc792" }],
+  },
+  ttl: {
+    expansion: "Time To Live — durée de vie, mais avec deux usages distincts à ne pas mélanger",
+    mentalModel:
+      "TTL signifie « combien de temps cette information ou ce paquet peut encore vivre », mais l’unité dépend du contexte : dans un paquet IP, le compteur diminue à chaque routeur ; dans DNS, il indique une durée de cache en secondes.",
+    prerequisites: ["ip", "ping", "dns"],
+    actors: [
+      { name: "Paquet IP", role: "Il transporte un compteur TTL que chaque routeur diminue d’au moins 1." },
+      { name: "Routeur", role: "Si le compteur atteint 0, il détruit le paquet et peut renvoyer ICMP Time Exceeded." },
+      { name: "Réponse DNS", role: "Elle contient un TTL en secondes indiquant combien de temps elle peut rester en cache." },
+      { name: "Cache DNS", role: "Il réutilise la réponse jusqu’à expiration au lieu de redemander immédiatement." },
+    ],
+    mechanism: [
+      "Le TTL IPv4 évite qu’un paquet tourne indéfiniment à cause d’une boucle de routage. En pratique, il fonctionne comme un compteur de sauts.",
+      "La valeur TTL montrée par ping est celle qui reste dans le paquet de réponse quand il arrive ; elle dépend de la valeur initiale choisie par la cible et du nombre de routeurs traversés.",
+      "Tracert envoie des paquets avec des TTL croissants : chaque expiration révèle, quand il répond, un routeur supplémentaire du chemin.",
+      "Le TTL DNS n’est pas dans le paquet IP : c’est un champ d’une réponse DNS, exprimé en secondes, qui gouverne la conservation en cache.",
+    ],
+    observable: {
+      command: "ping 1.1.1.1  puis  tracert 1.1.1.1",
+      output:
+        "Réponse de 1.1.1.1 : octets=32 temps=18 ms TTL=57\n\n1    2 ms    1 ms    2 ms  192.168.1.1\n2    9 ms    8 ms    9 ms  …\n3    *       *       *     Délai d’attente dépassé.",
+      reading: [
+        "TTL=57 n’est ni le temps de réponse ni le nombre certain de routeurs parcourus.",
+        "Chaque ligne de tracert correspond à une valeur TTL testée ; un astérisque signifie que ce saut n’a pas répondu à temps, pas que le chemin s’arrête forcément là.",
+        "Un TTL DNS de 300 signifie cinq minutes de cache autorisé ; c’est un autre compteur.",
+      ],
+    },
+    practice: {
+      title: "Voir le TTL sans le confondre avec le délai",
+      steps: [
+        "Lance ping vers ta passerelle et note temps=… puis TTL=… : ce sont deux mesures différentes.",
+        "Lance tracert 1.1.1.1 et repère les sauts, y compris les éventuels astérisques.",
+        "Explique à voix haute pourquoi TTL=57 ne signifie pas 57 ms ni 57 secondes.",
+        "Dans la fiche DNS, retrouve ensuite le second sens du TTL et formule la différence en une phrase.",
+      ],
+      expected:
+        "Tu dois retenir : TTL IP = compteur de sauts restant ; TTL DNS = durée de cache en secondes.",
+      caution: "On ne déduit pas exactement la distance à partir du seul TTL reçu, car la valeur initiale de la cible n’est pas toujours connue.",
+    },
+    proof: {
+      shows: ["qu’un mécanisme limite la durée de vie d’un paquet ou d’une donnée en cache ;", "dans tracert, certains équipements intermédiaires qui acceptent de répondre."],
+      doesNotShow: ["un temps en millisecondes quand il s’agit du TTL IP ;", "le nombre exact de routeurs à partir du seul TTL final affiché par ping."],
+    },
+    history:
+      "Le champ IPv4 conserve le nom historique Time To Live, même si les routeurs modernes le décrémentent comme un compteur de sauts. DNS réutilise le même sigle pour une durée de cache, ce qui fabrique une petite embuscade pédagogique parfaitement réglementaire.",
+    fieldNotes: [
+      "Lis toujours le contexte : sortie de ping et paquet IP, ou enregistrement et cache DNS.",
+      "Des astérisques dans tracert sont fréquents : certains routeurs transmettent le trafic sans répondre au diagnostic.",
+      "Une modification DNS peut rester invisible jusqu’à expiration des caches qui possèdent encore l’ancienne réponse.",
+    ],
+    related: ["ping", "icmp", "dns", "ip"],
+    sources: [
+      { label: "RFC 791 — champ TTL IPv4", url: "https://www.rfc-editor.org/rfc/rfc791" },
+      { label: "RFC 1035 — TTL DNS", url: "https://www.rfc-editor.org/rfc/rfc1035" },
+    ],
   },
   driver: {
     expansion: "Pilote de périphérique — device driver",
@@ -607,6 +783,50 @@ export const REVIEW_VARIANTS: Record<string, ReviewQuestion[]> = {
       ],
       answer: 0,
       explanation: "L’outil doit d’abord obtenir une adresse. Un nom introuvable indique que le test ICMP n’a probablement pas commencé.",
+    },
+  ],
+  icmp: [
+    {
+      question: "Ping affiche « délai d’attente dépassé ». Quelle conclusion est rigoureuse ?",
+      options: [
+        "Aucun Echo Reply attendu n’est revenu à temps ; il faut encore distinguer perte, filtrage et cible indisponible",
+        "La machine cible est nécessairement éteinte, puisque ICMP teste tous ses services",
+        "La résolution DNS a forcément échoué, même si la commande ciblait directement une adresse IP",
+      ],
+      answer: 0,
+      explanation: "Un silence ICMP a plusieurs causes possibles. Le message décrit le résultat du test, pas encore la cause certaine.",
+    },
+    {
+      question: "Pourquoi n’indique-t-on pas un numéro de port pour autoriser ICMP Echo ?",
+      options: [
+        "ICMP est un protocole associé à IP et n’utilise pas les ports TCP ou UDP",
+        "Le port est choisi aléatoirement et reste toujours invisible au système",
+        "Echo utilise obligatoirement le même port que HTTPS",
+      ],
+      answer: 0,
+      explanation: "Les ports appartiennent notamment à TCP et UDP. ICMP identifie ses messages par types et codes.",
+    },
+  ],
+  ttl: [
+    {
+      question: "Une réponse ping affiche temps=24 ms et TTL=55. Quelle lecture est correcte ?",
+      options: [
+        "24 ms est le délai aller-retour mesuré ; 55 est le compteur IP restant",
+        "55 ms est le délai réel et 24 le nombre exact de routeurs traversés",
+        "TTL=55 indique que la réponse DNS restera 55 secondes dans le cache",
+      ],
+      answer: 0,
+      explanation: "Dans la sortie de ping, « temps » et TTL sont deux champs distincts. Le TTL appartient ici au paquet IP reçu.",
+    },
+    {
+      question: "Pourquoi deux usages nommés TTL peuvent-ils donner des nombres sans rapport ?",
+      options: [
+        "Le TTL IP limite les sauts d’un paquet tandis que le TTL DNS fixe une durée de cache en secondes",
+        "Le TTL change d’unité uniquement quand le Wi‑Fi remplace Ethernet",
+        "Le TTL DNS mesure les routeurs et le TTL IP la durée de cache locale",
+      ],
+      answer: 0,
+      explanation: "Le sigle est identique, mais le contexte et l’unité diffèrent : compteur de sauts pour IP, secondes de cache pour DNS.",
     },
   ],
   driver: [
